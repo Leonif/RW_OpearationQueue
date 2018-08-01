@@ -47,26 +47,109 @@ class ListViewController: UITableViewController {
     return photos.count
   }
   
-  override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-    let cell = tableView.dequeueReusableCell(withIdentifier: "CellIdentifier", for: indexPath) 
-    let rowKey = photos.allKeys[indexPath.row] as! String
     
-    var image : UIImage?
-
-    guard let imageURL = URL(string:photos[rowKey] as! String),
-      let imageData = try? Data(contentsOf: imageURL) else {
-        return cell
+    
+    func fetchPhotoDetails() {
+        
+        let request = URLRequest(url: dataSourceURL)
+        
+        UIApplication.shared.isNetworkActivityIndicatorVisible = true
+        
+        let task = URLSession(configuration: .default).dataTask(with: request) { (data, responce, error) in
+            let alertController = UIAlertController(title: "Ops!", message: "Error of image loading", preferredStyle: .alert)
+            let okAction = UIAlertAction(title: "OK", style: .default)
+            alertController.addAction(okAction)
+            
+            
+            if error != nil {
+                DispatchQueue.main.async {
+                    UIApplication.shared.isNetworkActivityIndicatorVisible = false
+                    self.present(alertController, animated: true, completion: nil)
+                    return
+                }
+            }
+            
+            
+            
+            guard let data = data else {
+                DispatchQueue.main.async {
+                    UIApplication.shared.isNetworkActivityIndicatorVisible = false
+                    self.present(alertController, animated: true, completion: nil)
+                }
+            }
+            do {
+                
+                let dataSourceDictionary = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as! [String: String]
+                
+                
+                for (name, value) in dataSourceDictionary {
+                    if let url = URL(string: value) {
+                        
+                        let photoRecord = PhotoRecord(name: name, url: url)
+                        self.photos.append(photoRecord)
+                        
+                    }
+                }
+                
+                
+                DispatchQueue.main.async {
+                    UIApplication.shared.isNetworkActivityIndicatorVisible = false
+                    self.tableView.reloadData()
+                }
+                
+            } catch {
+                DispatchQueue.main.async {
+                    self.present(alertController, animated: true, completion: nil)
+                }
+            }
+        }
+        
+        
+        task.resume()
+        
+        
     }
-
-    //1
-    let unfilteredImage = UIImage(data:imageData)
-    //2
-    image = self.applySepiaFilter(unfilteredImage!)
-
-    // Configure the cell...
-    cell.textLabel?.text = rowKey
-    if image != nil {
-      cell.imageView?.image = image!
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+  override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+    
+    let cell = tableView.dequeueReusableCell(withIdentifier: "CellIdentifier", for: indexPath)
+    
+    if cell.accessoryView == nil {
+        let indicator = UIActivityIndicatorView(activityIndicatorStyle: .gray)
+        cell.accessoryView = indicator
+    }
+    let indicator = cell.accessoryView as! UIActivityIndicatorView
+    
+    let photoDetails = photos[indexPath.row]
+    
+    cell.textLabel?.text = photoDetails.name
+    cell.imageView?.image = photoDetails.image
+    
+    switch photoDetails.state {
+    case .filtred:
+        indicator.stopAnimating()
+    case .failed:
+        indicator.stopAnimating()
+        cell.textLabel?.text = "Failed to load"
+    case .new, .downloaded:
+        indicator.startAnimating()
+        startOpearation(for: photoDetails, at: indexPath)
     }
     
     return cell
