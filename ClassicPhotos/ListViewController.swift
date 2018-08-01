@@ -35,18 +35,19 @@ class ListViewController: UITableViewController {
     var photos: [PhotoRecord] = []
     var pendingOpearations: PendingOperations = PendingOperations()
     
-  
-  override func viewDidLoad() {
-    super.viewDidLoad()
-    self.title = "Classic Photos"
-  }
-  
-  // MARK: - Table view data source
-
-  override func tableView(_ tableView: UITableView?, numberOfRowsInSection section: Int) -> Int {
-    return photos.count
-  }
-  
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        self.title = "Classic Photos"
+        self.fetchPhotoDetails()
+    }
+    
+    // MARK: - Table view data source
+    
+    override func tableView(_ tableView: UITableView?, numberOfRowsInSection section: Int) -> Int {
+        return photos.count
+    }
+    
     
     
     func fetchPhotoDetails() {
@@ -60,7 +61,6 @@ class ListViewController: UITableViewController {
             let okAction = UIAlertAction(title: "OK", style: .default)
             alertController.addAction(okAction)
             
-            
             if error != nil {
                 DispatchQueue.main.async {
                     UIApplication.shared.isNetworkActivityIndicatorVisible = false
@@ -69,28 +69,24 @@ class ListViewController: UITableViewController {
                 }
             }
             
-            
-            
             guard let data = data else {
                 DispatchQueue.main.async {
                     UIApplication.shared.isNetworkActivityIndicatorVisible = false
                     self.present(alertController, animated: true, completion: nil)
+                    
                 }
+                return
             }
             do {
-                
                 let dataSourceDictionary = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as! [String: String]
-                
                 
                 for (name, value) in dataSourceDictionary {
                     if let url = URL(string: value) {
-                        
                         let photoRecord = PhotoRecord(name: name, url: url)
                         self.photos.append(photoRecord)
                         
                     }
                 }
-                
                 
                 DispatchQueue.main.async {
                     UIApplication.shared.isNetworkActivityIndicatorVisible = false
@@ -103,71 +99,119 @@ class ListViewController: UITableViewController {
                 }
             }
         }
-        
-        
         task.resume()
+    }
+    
+    
+    
+    
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         
+        let cell = tableView.dequeueReusableCell(withIdentifier: "CellIdentifier", for: indexPath)
         
+        if cell.accessoryView == nil {
+            let indicator = UIActivityIndicatorView(activityIndicatorStyle: .gray)
+            cell.accessoryView = indicator
+        }
+        let indicator = cell.accessoryView as! UIActivityIndicatorView
+        
+        let photoDetails = photos[indexPath.row]
+        
+        cell.textLabel?.text = photoDetails.name
+        cell.imageView?.image = photoDetails.image
+        
+        switch photoDetails.state {
+        case .filtred:
+            indicator.stopAnimating()
+        case .failed:
+            indicator.stopAnimating()
+            cell.textLabel?.text = "Failed to load"
+        case .new, .downloaded:
+            indicator.startAnimating()
+            startOperations(for: photoDetails, at: indexPath)
+        }
+        
+        return cell
+    }
+    
+    
+    func startOperations(for photoRecord: PhotoRecord, at indexPath: IndexPath) {
+        switch (photoRecord.state) {
+        case .new:
+            startDownload(for: photoRecord, at: indexPath)
+        case .downloaded:
+            startFiltration(for: photoRecord, at: indexPath)
+        default:
+            NSLog("do nothing")
+        }
     }
     
     
     
+    // MARK: - image processing
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-  override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-    
-    let cell = tableView.dequeueReusableCell(withIdentifier: "CellIdentifier", for: indexPath)
-    
-    if cell.accessoryView == nil {
-        let indicator = UIActivityIndicatorView(activityIndicatorStyle: .gray)
-        cell.accessoryView = indicator
-    }
-    let indicator = cell.accessoryView as! UIActivityIndicatorView
-    
-    let photoDetails = photos[indexPath.row]
-    
-    cell.textLabel?.text = photoDetails.name
-    cell.imageView?.image = photoDetails.image
-    
-    switch photoDetails.state {
-    case .filtred:
-        indicator.stopAnimating()
-    case .failed:
-        indicator.stopAnimating()
-        cell.textLabel?.text = "Failed to load"
-    case .new, .downloaded:
-        indicator.startAnimating()
-        startOpearation(for: photoDetails, at: indexPath)
+    func applySepiaFilter(_ image:UIImage) -> UIImage? {
+        let inputImage = CIImage(data:UIImagePNGRepresentation(image)!)
+        let context = CIContext(options:nil)
+        let filter = CIFilter(name:"CISepiaTone")
+        filter?.setValue(inputImage, forKey: kCIInputImageKey)
+        filter!.setValue(0.8, forKey: "inputIntensity")
+        
+        guard let outputImage = filter!.outputImage,
+            let outImage = context.createCGImage(outputImage, from: outputImage.extent) else {
+                return nil
+        }
+        return UIImage(cgImage: outImage)
     }
     
-    return cell
-  }
-  
-  // MARK: - image processing
-
-  func applySepiaFilter(_ image:UIImage) -> UIImage? {
-    let inputImage = CIImage(data:UIImagePNGRepresentation(image)!)
-    let context = CIContext(options:nil)
-    let filter = CIFilter(name:"CISepiaTone")
-    filter?.setValue(inputImage, forKey: kCIInputImageKey)
-    filter!.setValue(0.8, forKey: "inputIntensity")
-
-    guard let outputImage = filter!.outputImage,
-      let outImage = context.createCGImage(outputImage, from: outputImage.extent) else {
-        return nil
+    
+    
+    func startDownload(for photoRecord: PhotoRecord, at indexPath: IndexPath) {
+        //1
+        guard pendingOpearations.downloadsProgress[indexPath] == nil else {
+            return
+        }
+        
+        //2
+        let downloader = ImageDownloader(photoRecord: photoRecord)
+        
+        //3
+        downloader.completionBlock = {
+            if downloader.isCancelled {
+                return
+            }
+            
+            DispatchQueue.main.async {
+                self.pendingOpearations.downloadsProgress.removeValue(forKey: indexPath)
+                self.tableView.reloadRows(at: [indexPath], with: .fade)
+            }
+        }
+        
+        //4
+        pendingOpearations.downloadsProgress[indexPath] = downloader
+        
+        //5
+        pendingOpearations.downloadQueue.addOperation(downloader)
     }
-    return UIImage(cgImage: outImage)
-  }
+    
+    func startFiltration(for photoRecord: PhotoRecord, at indexPath: IndexPath) {
+        guard pendingOpearations.filtrationsProgress[indexPath] == nil else {
+            return
+        }
+        
+        let filterer = ImageFiltration(photoRecord: photoRecord)
+        filterer.completionBlock = {
+            if filterer.isCancelled {
+                return
+            }
+            
+            DispatchQueue.main.async {
+                self.pendingOpearations.filtrationsProgress.removeValue(forKey: indexPath)
+                self.tableView.reloadRows(at: [indexPath], with: .fade)
+            }
+        }
+        
+        pendingOpearations.filtrationsProgress[indexPath] = filterer
+        pendingOpearations.filtrationQueue.addOperation(filterer)
+    }
 }

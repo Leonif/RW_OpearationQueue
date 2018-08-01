@@ -60,7 +60,7 @@ class PendingOperations {
     }()
     
     lazy var filtrationsProgress: [IndexPath: Operation] = [:]
-    lazy var filtrationProcess: OperationQueue = {
+    lazy var filtrationQueue: OperationQueue = {
         var queue = OperationQueue()
         queue.name = "Image filtration queue"
         queue.maxConcurrentOperationCount = 1
@@ -150,11 +150,6 @@ class ImageFiltration: Operation {
         
         return UIImage(cgImage: outImage)
     }
-    
-    
-    
-    
-    
 }
 
 
